@@ -23,7 +23,7 @@ artifacts/
 outputs/
 *.csv
 *.parquet
-!data/.gitkeep
+#!data/.gitkeep
 
 # Jupyter
 .ipynb_checkpoints/

@@ -3,10 +3,72 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+if importlib.util.find_spec("weave"):
+    import weave  # type: ignore
+    _WEAVE_AVAILABLE = True
+else:
+    weave = None  # type: ignore
+    _WEAVE_AVAILABLE = False
+
+import dataclasses
+
+import pandas as pd
+
+
+def _summarize(value: Any) -> Any:
+    """Replace bulky pandas objects with a small JSON-safe summary for Weave traces."""
+    if isinstance(value, pd.DataFrame):
+        return {
+            "_type": "DataFrame",
+            "shape": list(value.shape),
+            "columns": list(value.columns),
+            "head": value.head(5).to_dict(orient="records"),
+        }
+    if isinstance(value, pd.Series):
+        return {"_type": "Series", "length": len(value), "head": value.head(5).to_list()}
+    if isinstance(value, dict):
+        return {k: _summarize(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_summarize(v) for v in value]
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {
+            "_type": type(value).__name__,
+            **{f.name: _summarize(getattr(value, f.name)) for f in dataclasses.fields(value)},
+        }
+    return value
+
+
+def _summarize_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    return {k: _summarize(v) for k, v in inputs.items()}
+
+
+def _traced(name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
+    if _WEAVE_AVAILABLE:
+        return weave.op(
+            name=name,
+            postprocess_inputs=_summarize_inputs,
+            postprocess_output=_summarize,
+        )(fn)
+    return fn
+
+
+def _maybe_op(name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        if _WEAVE_AVAILABLE:
+            return weave.op(
+                name=name,
+                postprocess_inputs=_summarize_inputs,
+                postprocess_output=_summarize,
+            )(fn)
+        return fn
+    return decorator
+
 
 from amazon_business_analyst.agents.campaign_enrichment_agent import CampaignEnrichmentAgent
 from amazon_business_analyst.agents.executive_dashboard_agent import ExecutiveDashboardAgent
@@ -37,6 +99,7 @@ class RunOrchestratorAgent:
         return run_pipeline(*args, **kwargs)
 
 
+@_maybe_op("amazon_ads.run_pipeline")
 def run_pipeline(
     input_path: str,
     output_dir: str,
@@ -47,9 +110,17 @@ def run_pipeline(
     wandb_project: str | None = None,
     wandb_run_name: str | None = None,
     regression_baseline: str | None = None,
+    enable_weave: bool = False,
+    weave_project: str | None = None,
 ) -> PipelineResult:
     config = config or AnalysisConfig()
     out_dir = ensure_output_dir(output_dir)
+
+    if enable_weave:
+        if not _WEAVE_AVAILABLE:
+            raise RuntimeError("enable_weave=True but the 'weave' package is not installed.")
+        weave.init(weave_project or wandb_project or "amazon-business-analyst")
+
     reliability = ReliabilityRun(
         output_dir=out_dir,
         config=config,
@@ -59,13 +130,13 @@ def run_pipeline(
     )
 
     try:
-        load_result = LoadValidationAgent().run(input_path, sheet_name=sheet_name)
+        load_result = _traced("load_validation", LoadValidationAgent().run)(input_path, sheet_name=sheet_name)
         raw_path = out_dir / "validated_raw_search_terms.csv"
         load_result.table.to_csv(raw_path, index=False)
         reliability.log_metrics(load_result.report)
         reliability.log_table_artifact("validated_raw_search_terms", load_result.table, raw_path)
 
-        enrich_result = CampaignEnrichmentAgent().run(load_result.table)
+        enrich_result = _traced("campaign_enrichment", CampaignEnrichmentAgent().run)(load_result.table)
         enriched_path = out_dir / "enriched_search_terms.csv"
         enrich_result.table.to_csv(enriched_path, index=False)
         reliability.log_metrics(
@@ -75,14 +146,14 @@ def run_pipeline(
         )
         reliability.log_table_artifact("enriched_search_terms", enrich_result.table, enriched_path)
 
-        scorecard_result = ScorecardAgent().run(enrich_result.table, config)
+        scorecard_result = _traced("scorecard", ScorecardAgent().run)(enrich_result.table, config)
         scorecard_path = out_dir / "scorecard.csv"
         scorecard_result.scorecard.to_csv(scorecard_path, index=False)
         reliability.log_metrics(scorecard_result.metrics)
         reliability.log_self_checks({f"scorecard_{key}": value for key, value in scorecard_result.self_checks.items()})
         reliability.log_table_artifact("scorecard", scorecard_result.scorecard, scorecard_path)
 
-        cut_result = NegativeKeywordCutAgent().run(enrich_result.table, config)
+        cut_result = _traced("negative_kw_cut", NegativeKeywordCutAgent().run)(enrich_result.table, config)
         cut_path = out_dir / "negative_keyword_candidates.csv"
         cut_summary_path = out_dir / "negative_keyword_summary.csv"
         cut_result.candidates.to_csv(cut_path, index=False)
@@ -91,14 +162,14 @@ def run_pipeline(
         reliability.log_table_artifact("negative_keyword_candidates", cut_result.candidates, cut_path)
         reliability.log_table_artifact("negative_keyword_summary", cut_result.summary, cut_summary_path)
 
-        grow_result = HarvestGrowAgent().run(enrich_result.table, config)
+        grow_result = _traced("harvest_grow", HarvestGrowAgent().run)(enrich_result.table, config)
         harvest_path = out_dir / "harvest_candidates.csv"
         grow_result.candidates.to_csv(harvest_path, index=False)
         reliability.log_metrics(grow_result.summary)
         reliability.log_self_checks({f"harvest_{key}": value for key, value in grow_result.self_checks.items()})
         reliability.log_table_artifact("harvest_candidates", grow_result.candidates, harvest_path)
 
-        writer_result = RecommendationWriterAgent().run(
+        writer_result = _traced("recommendation_writer", RecommendationWriterAgent().run)(
             out_dir,
             config,
             scorecard_result.scorecard,
@@ -121,7 +192,7 @@ def run_pipeline(
             metrics[f"{bucket_key}_sales"] = float(scorecard_row["Sales"])
             metrics[f"{bucket_key}_acos"] = float(scorecard_row["ACoS"])
 
-        regression_result = RegressionTestAgent().run(metrics, regression_baseline)
+        regression_result = _traced("regression_test", RegressionTestAgent().run)(metrics, regression_baseline)
         regression_path = out_dir / "regression_test_report.json"
         regression_path.write_text(json.dumps(regression_result.report, indent=2, sort_keys=True), encoding="utf-8")
         reliability.log_file_artifact("regression_test_report", regression_path, "validation")
@@ -153,7 +224,7 @@ def run_pipeline(
         summary_path = out_dir / "run_summary.json"
         summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
 
-        dashboard_result = ExecutiveDashboardAgent().run(out_dir)
+        dashboard_result = _traced("executive_dashboard", ExecutiveDashboardAgent().run)(out_dir)
         summary["dashboard_path"] = str(dashboard_result.index_path)
         summary["artifacts"].update(
             {
@@ -185,6 +256,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-wandb", action="store_true", help="Log to W&B if wandb is installed.")
     parser.add_argument("--wandb-project", default="amazon-business-analyst", help="W&B project name.")
     parser.add_argument("--wandb-run-name", default=None, help="Optional W&B run name.")
+    parser.add_argument("--enable-weave", action="store_true", help="Trace pipeline steps with W&B Weave.")
+    parser.add_argument("--weave-project", default=None, help="Weave project name (defaults to --wandb-project).")
     parser.add_argument("--regression-baseline", default=None, help="Optional JSON baseline for regression validation.")
     parser.add_argument("--target-acos-blended", type=float, default=None)
     parser.add_argument("--target-acos-discovery", type=float, default=None)
@@ -226,6 +299,8 @@ def main() -> None:
         wandb_project=args.wandb_project,
         wandb_run_name=args.wandb_run_name,
         regression_baseline=args.regression_baseline,
+        enable_weave=args.enable_weave,
+        weave_project=args.weave_project,
     )
     print(
         json.dumps(
