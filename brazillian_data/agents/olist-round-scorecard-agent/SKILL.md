@@ -1,6 +1,6 @@
 ---
 name: olist-round-scorecard-agent
-description: Evaluate each Brazilian Olist optimization round against the prior round using a 100-point scorecard. Use when scoring forecast accuracy, margin proxy, sales growth, recommendation quality, learning quality, and whether the round moved closer to the profitable-growth goal.
+description: Evaluate each Brazilian Olist optimization round against the prior round using a goal-progress and policy-improvement scorecard. Use when scoring business outcome, forecast policy quality, learning execution, and whether the run moved closer to the profitable-growth goal.
 ---
 
 # Olist Round Scorecard Agent
@@ -19,6 +19,8 @@ For current round:
 - `outputs/runs/<round_id>/recommended_actions.csv`
 - `outputs/runs/<round_id>/closed_loop_scorecard.csv`
 - `outputs/runs/<round_id>/critic_qa_findings.md`
+- `outputs/runs/<round_id>/forecast_policy_experiments.csv`
+- `outputs/policy_memory.md`
 
 For comparison:
 
@@ -27,7 +29,31 @@ For comparison:
 
 ## Score Formula
 
-Use a 100-point round score:
+Use the V3 100-point score for new rounds. Preserve older columns when reading historical scorecards, but score new rounds with:
+
+```text
+round_score =
+  40 outcome_score
++ 40 forecast_policy_score
++ 20 learning_score
+```
+
+This makes consecutive improvement measurable without pretending the market is controllable.
+
+## V2 Score Formula
+
+Historical V2 rounds may use:
+
+```text
+round_score =
+  50 forecast_model_score
++ 30 business_optimization_score
++ 20 learning_execution_score
+```
+
+## Legacy Score Formula
+
+Older rounds may use this formula:
 
 ```text
 round_score =
@@ -38,15 +64,51 @@ round_score =
 + 10 learning_quality_score
 ```
 
-## Forecast Accuracy Score
+Do not rewrite old scorecards unless the user asks for a full restatement.
 
-Use WAPE and bias from `forecast_backtest_results.csv`:
+## Outcome Score
+
+For new rounds, score actual business movement separately:
 
 ```text
-forecast_accuracy_score =
-  25 * max(0, 1 - WAPE)
-+ 10 * max(0, 1 - abs(bias))
+outcome_score =
+  sales_growth_component
++ margin_proxy_component
++ customer_experience_component
 ```
+
+Recommended point split:
+
+- 15 points: delivered item revenue growth versus prior round
+- 15 points: margin proxy movement, especially freight percentage and AOV
+- 10 points: customer experience movement, especially late delivery, review score, and same-state fulfillment
+
+If revenue grows while freight percentage or late delivery worsens materially, cap `outcome_score` at 25 out of 40 and mark `closer_to_goal=mixed`.
+
+## Forecast Policy Score
+
+For new rounds, score forecast quality across grains:
+
+```text
+forecast_policy_score =
+  marketplace_accuracy_score
++ category_accuracy_score
++ state_accuracy_score
++ category_state_accuracy_score
++ directional_accuracy_score
++ bias_control_score
++ policy_discipline_score
+```
+
+Recommended point split:
+
+- 12 points: marketplace WAPE
+- 14 points: category WAPE
+- 8 points: customer_state WAPE
+- 6 points: category_customer_state WAPE
+- 5 points: directional accuracy
+- 3 points: bias control
+- 2 points: policy discipline, including champion/challenger tracking and avoiding overfit promotions
 
 Definitions:
 
@@ -54,46 +116,44 @@ Definitions:
 - `bias`: sum forecast error divided by sum actual sales
 - Positive bias means demand was under-forecasted
 - Negative bias means demand was over-forecasted
+- `directional_accuracy`: share of segments where the forecast predicted the correct up/down direction versus the prior comparable period
 
-Score at the highest reliable grain first: marketplace total, category, state, and category-state. Product-level scores should not dominate if data is sparse.
+Product-level scores should remain diagnostic and should not dominate the round score unless product history is sufficient.
 
-## Margin Proxy Score
+## Learning Score
 
-Compare the current forecast-month actuals against the prior round's forecast-month actuals:
-
-- 8 points: `freight_pct` improved
-- 6 points: `aov` improved
-- 5 points: `late_delivery_rate` improved
-- 3 points: `avg_review_score` improved
-- 3 points: `same_state_fulfillment_rate` improved
-
-If a metric is unavailable, assign 0 for that metric and note the missing data.
-
-## Sales Growth Score
-
-Compare current actual delivered item revenue with the prior round actual delivered item revenue:
+For new rounds, score whether the agent actually improved its method:
 
 ```text
-sales_growth_score =
-  20 * max(0, min(1, revenue_growth_pct / target_growth_pct))
+learning_score =
+  method_comparison_score
++ prior_learning_application_score
++ policy_memory_application_score
++ rule_update_quality_score
++ rollback_or_promotion_quality_score
++ unsupported_claim_avoidance_score
 ```
 
-Default `target_growth_pct`: 5%.
+Recommended point split:
 
-If there is no prior round, set this score to `baseline` and explain that trend comparison begins next round.
+- 4 points: compared multiple forecast methods
+- 4 points: applied prior learning handoff
+- 4 points: applied active policy memory
+- 4 points: created concrete next-round rule updates
+- 2 points: promoted or rolled back policies only with evidence
+- 2 points: avoided unsupported claims and overconfidence
 
-## Recommendation Quality Score
+## Legacy Component Scores
 
-Score the current round's recommended actions:
+If a run still uses the legacy fields, keep these definitions:
 
-- 2 points: evidence included
-- 2 points: target segment clearly defined
-- 2 points: expected sales impact included
-- 2 points: expected margin-proxy impact included
-- 1 point: risk included
-- 1 point: next measurement included
+- `forecast_accuracy_score`: legacy WAPE and bias score
+- `margin_proxy_score`: legacy margin proxy score
+- `sales_growth_score`: legacy sales growth score
+- `recommendation_quality_score`: legacy action completeness score
+- `learning_quality_score`: legacy learning score
 
-Average across the top recommended actions.
+New rounds should include both V2 and legacy fields when practical so the dashboard can compare old and new runs.
 
 ## Learning Quality Score
 
@@ -115,6 +175,12 @@ Create `outputs/runs/<round_id>/round_scorecard.csv` with:
 - `forecast_month`
 - `previous_round_id`
 - `round_score`
+- `outcome_score`
+- `forecast_policy_score`
+- `learning_score`
+- `forecast_model_score`
+- `business_optimization_score`
+- `learning_execution_score`
 - `forecast_accuracy_score`
 - `margin_proxy_score`
 - `sales_growth_score`
@@ -129,9 +195,13 @@ Create `outputs/runs/<round_id>/round_scorecard.csv` with:
 - `review_score_delta`
 - `same_state_fulfillment_delta`
 - `delta_vs_prior_round`
+- `policy_score_delta`
+- `policy_improved`
+- `business_outcome_improved`
 - `closer_to_goal`
 - `reason`
 - `confidence`
+- `scorecard_version`
 
 Also append or update `outputs/round_scorecard_history.csv` with one row per round.
 
@@ -152,3 +222,6 @@ Always explain the reason in plain business terms.
 - Do not call a round better if sales rose but margin proxy materially deteriorated without caveat.
 - Do not claim true profit improvement; use margin proxy.
 - If the critic QA agent marked outputs as `needs_revision`, cap recommendation quality at 5.
+- If `forecast_method_candidates.csv` or `forecast_method_leaderboard.csv` is missing in a new round, cap learning execution at 10 out of 20.
+- If `outputs/policy_memory.md` is missing in a new round, cap learning score at 10 out of 20.
+- If no champion/challenger or explore/exploit decision is documented, cap forecast policy score at 30 out of 40.

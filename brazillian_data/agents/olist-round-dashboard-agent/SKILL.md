@@ -17,6 +17,8 @@ Generate a dashboard that compares all completed rounds. Do not write applicatio
 - `outputs/runs/*/recommended_actions.csv`
 - `outputs/runs/*/critic_qa_findings.md`
 - `outputs/runs/*/executive_summary.md`
+- `outputs/policy_memory.md`
+- `outputs/policy_change_log.csv`
 
 ## Required Outputs
 
@@ -38,8 +40,10 @@ Create or update:
 7. Learning quality trend
 8. Top actions by round
 9. Rule changes carried into next round
-10. Open risks and unresolved issues
-11. Next-round prompt pointer
+10. Active policy memory
+11. Champion/challenger status
+12. Open risks and unresolved issues
+13. Next-round prompt pointer
 
 ## Dashboard Data Columns
 
@@ -50,6 +54,7 @@ Create or update:
 - `round_score`
 - `delta_vs_prior_round`
 - `closer_to_goal`
+- `scorecard_version`
 - `forecast_accuracy_score`
 - `wape`
 - `bias`
@@ -57,6 +62,12 @@ Create or update:
 - `sales_growth_score`
 - `recommendation_quality_score`
 - `learning_quality_score`
+- `outcome_score`
+- `forecast_policy_score`
+- `learning_score`
+- `policy_improved`
+- `business_outcome_improved`
+- `active_policy_summary`
 - `top_action_1`
 - `top_action_2`
 - `top_action_3`
@@ -78,6 +89,7 @@ Use this layout:
 - Latest score:
 - Delta vs prior:
 - Closer to goal:
+- Scorecard version:
 - Main reason:
 
 ## Round Score Trend
@@ -85,7 +97,12 @@ Use this layout:
 | Round | Forecast Month | Score | Delta | Closer To Goal | WAPE | Bias |
 | --- | --- | ---: | ---: | --- | ---: | ---: |
 
-## Component Scores
+## V3 Component Scores
+
+| Round | Outcome | Forecast Policy | Learning | Policy Improved | Business Outcome Improved |
+| --- | ---: | ---: | ---: | --- | --- |
+
+## Historical Component Scores
 
 | Round | Forecast Accuracy | Margin Proxy | Sales Growth | Recommendation Quality | Learning Quality |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -99,6 +116,16 @@ Use this layout:
 
 | Round | Prior Insight Applied | Rule Change | Result | Carry Forward |
 | --- | --- | --- | --- | --- |
+
+## Active Policy Memory
+
+| Policy Area | Grain | Champion | Challenger | Status | Next Measurement |
+| --- | --- | --- | --- | --- | --- |
+
+## Policy Changes
+
+| Round | Policy Area | Change | Status | Evidence | Next Check |
+| --- | --- | --- | --- | --- | --- |
 
 ## Open Risks
 
@@ -117,3 +144,6 @@ Use this layout:
 - If a round is missing a scorecard, list it under open risks instead of filling synthetic values.
 - Use `closer_to_goal` exactly as scored by the scorecard agent.
 - Surface mixed outcomes, especially sales gains with margin-proxy deterioration.
+- Surface cases where `policy_improved=yes` but `business_outcome_improved=no`.
+- Preserve historical V2/legacy rows without inventing V3 component values; leave V3 fields blank or mark them not scored until a V3 run exists.
+- The dashboard must make the active policy memory visible enough that the next-round agent can see which rules should be applied.

@@ -20,6 +20,10 @@ Challenge the analysis before it reaches decision makers. Do not write applicati
 - `outputs/runs/<round_id>/ops_efficiency_opportunities.csv`
 - `outputs/runs/<round_id>/recommended_actions.csv`
 - `outputs/runs/<round_id>/closed_loop_scorecard.csv`
+- `outputs/runs/<round_id>/forecast_method_candidates.csv`
+- `outputs/runs/<round_id>/forecast_method_leaderboard.csv`
+- `outputs/runs/<round_id>/forecast_policy_experiments.csv`
+- `outputs/policy_memory.md`
 
 ## QA Checks
 
@@ -36,6 +40,11 @@ Check for:
 - Free-shipping actions without AOV or margin-proxy guardrails
 - Forecast backtest missing WAPE, MAPE, or bias
 - Missing next measurement for a recommended action
+- Policy changes that overfit to one round
+- Challenger promotion without enough evidence
+- Rollback not triggered when a policy worsened WAPE, bias, or margin proxy
+- Explore allocation too large for high-GMV segments
+- Active policy memory ignored without explanation
 
 ## Required Output
 
@@ -48,6 +57,7 @@ Create `critic_qa_findings.md` with:
 - Confidence downgrades
 - Recommendations to revise
 - Claims that need caveats
+- Policy gate decisions
 - Final approval status
 
 Use this approval status:
@@ -70,6 +80,9 @@ Use:
 - Do not block because true profit is unavailable; require the recommendation to say margin proxy.
 - Do not require perfect forecasting for sparse segments; require correct confidence labels.
 - Prefer specific revision text over vague criticism.
+- Approve, reject, or modify every proposed policy promotion or rollback.
+- Do not approve a challenger promotion based only on sparse product or category-state wins.
+- Require rollback when a policy materially worsens category WAPE or marketplace bias unless there is a documented business reason to continue testing.
 
 ## Handoff
 
