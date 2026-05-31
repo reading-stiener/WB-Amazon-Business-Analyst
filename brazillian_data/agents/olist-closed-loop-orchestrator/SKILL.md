@@ -1,6 +1,6 @@
 ---
 name: olist-closed-loop-orchestrator
-description: Coordinate the Brazilian Olist multi-agent closed-loop optimization using only SKILL.md-based agents. Use when the task is to run or plan monthly optimization rounds across forecasting, product health, demand seasonality, operational efficiency, recommendation scoring, critique, round scorecards, learning handoffs, next-round prompts, dashboards, and executive summary.
+description: Coordinate the Brazilian Olist multi-agent closed-loop optimization using only SKILL.md-based agents. Use when the task is to run or plan monthly optimization rounds across forecasting, product health, demand seasonality, operational efficiency, recommendation scoring, critique, round scorecards, policy memory, learning handoffs, next-round prompts, dashboards, and executive summary.
 ---
 
 # Olist Closed-Loop Orchestrator
@@ -38,8 +38,9 @@ Run agents in this order:
 8. `olist-executive-summary-agent`
 9. `olist-round-scorecard-agent`
 10. `olist-learning-handoff-agent`
-11. `olist-next-round-prompt-agent`
-12. `olist-round-dashboard-agent`
+11. `olist-policy-memory-agent`
+12. `olist-next-round-prompt-agent`
+13. `olist-round-dashboard-agent`
 
 Agents 3, 4, and 5 may work in parallel after the forecasting agent has produced actuals and backtest outputs.
 
@@ -58,13 +59,14 @@ Use this loop every month:
 9. Produce executive summary.
 10. Score the round against the previous round.
 11. Produce a learning handoff that the next round must apply.
-12. Generate the next-round prompt.
-13. Update the dashboard across all completed rounds.
+12. Update persistent policy memory with critic-gated promotions, carry-forwards, and rollbacks.
+13. Generate the next-round prompt.
+14. Update the dashboard across all completed rounds.
 
 The required pattern is:
 
 ```text
-round output -> round_scorecard.csv -> learning_handoff.md -> next_round_prompt.md -> next round
+round output -> round_scorecard.csv -> learning_handoff.md -> policy_memory.md -> next_round_prompt.md -> next round
 ```
 
 ## Required Output Folder
@@ -73,6 +75,9 @@ Use or create an `outputs/` folder in the dataset directory. Each round must wri
 
 - `monthly_sales_actuals.csv`
 - `monthly_forecasts.csv`
+- `forecast_method_candidates.csv`
+- `forecast_method_leaderboard.csv`
+- `forecast_policy_experiments.csv`
 - `forecast_backtest_results.csv`
 - `product_health_flags.csv`
 - `category_health_flags.csv`
@@ -89,6 +94,8 @@ Use or create an `outputs/` folder in the dataset directory. Each round must wri
 Expected cross-round artifacts:
 
 - `outputs/round_scorecard_history.csv`
+- `outputs/policy_memory.md`
+- `outputs/policy_change_log.csv`
 - `outputs/round_dashboard_data.csv`
 - `outputs/round_dashboard.md`
 
@@ -115,7 +122,27 @@ Margin-proxy lift can come from:
 
 ## Round Score
 
-Use the round score to decide whether the current round moved closer to the goal than the last round:
+Use the V3 round score for new rounds to decide whether the current round moved closer to the goal than the last round:
+
+```text
+round_score =
+  40 outcome_score
++ 40 forecast_policy_score
++ 20 learning_score
+```
+
+This separates actual business movement from agent decision quality. Market demand can worsen; the framework should still improve forecast policy, confidence, guardrails, and learning discipline.
+
+Historical V2 rounds may still use this formula:
+
+```text
+round_score =
+  50 forecast_model_score
++ 30 business_optimization_score
++ 20 learning_execution_score
+```
+
+Historical rounds may still use this legacy formula:
 
 ```text
 round_score =
@@ -133,6 +160,25 @@ Set `closer_to_goal` from the scorecard:
 - `mixed` if total score improves but a critical metric worsens materially
 - `baseline` if no prior round exists
 
+## Forecast Self-Improvement Rules
+
+The forecasting step must improve from prior rounds instead of reusing one method everywhere.
+
+Every new round must:
+
+- Read `outputs/policy_memory.md` before forecasting.
+- Read the prior `learning_handoff.md` before forecasting.
+- Compare candidate methods by grain and segment where history is sufficient.
+- Produce `forecast_method_candidates.csv` and `forecast_method_leaderboard.csv`.
+- Produce `forecast_policy_experiments.csv` naming champion, challenger, exploit, and explore selections.
+- Select methods using rolling WAPE, bias, directional accuracy, and prior learning.
+- Apply bias correction to repeatedly over- or under-forecasted segments.
+- Apply spike dampening after one-month jumps that were not confirmed.
+- Use shrinkage for sparse category-state and product segments.
+- Keep product-level forecasts diagnostic unless sufficient history exists.
+- Use 80/20 explore/exploit by policy intent: mostly champion methods, with explicit challenger tests.
+- Roll back policy changes that worsen category WAPE, bias, or margin proxy without an offsetting benefit.
+
 ## Decision Rules
 
 - Prioritize actions that improve both sales and margin proxy.
@@ -141,7 +187,9 @@ Set `closer_to_goal` from the scorecard:
 - Separate actual seasonality from product deterioration.
 - Always include the next metric to check in the next monthly loop.
 - Read the previous round's `learning_handoff.md` before forecasting or recommending actions.
+- Read `outputs/policy_memory.md` before forecasting or recommending actions.
 - If a prior learning is not applied, explain why in `critic_qa_findings.md` and the new `learning_handoff.md`.
+- If an active policy is not applied, explain why in `critic_qa_findings.md`, `learning_handoff.md`, and `policy_change_log.csv`.
 - Update `outputs/round_dashboard.md` after every completed round.
 
 ## Final Handoff Contract

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Amazon Ads Weekly Budget"
+  short_description: "Weekly Amazon Ads budget workflow"
+  default_prompt: "Use $amazon-ads-weekly-budget to analyze the latest Amazon Sponsored Products search-term report, generate weekly CUT/FIX/GROW recommendations, and produce the executive budget dashboard."
+
