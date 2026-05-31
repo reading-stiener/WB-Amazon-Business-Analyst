@@ -1,22 +1,22 @@
-# Search-Term Analysis Agent — Plan
+# Search-Term Analysis Agent — Weekly Plan
 
-**Goal:** Ingest a monthly Amazon Sponsored Products search-term report and produce a CUT / FIX / GROW recommendation set for next month.
+**Goal:** Ingest the latest Amazon Sponsored Products search-term report each week, compare it against prior recommendations and actual outcomes, and produce a CUT / FIX / GROW recommendation set plus a web-based budget dashboard for the next week.
 
 **Input:** CSV with `Customer Search Term, Match Type, Campaign Name, Clicks, Impressions, Spend, Orders, Sales, ACoS, CVR, CTR`.
 
 ## Config (logged as `wandb.config`)
 
-- `target_acos_blended = 0.25`
-- `target_acos_discovery = 0.25`
-- `target_acos_brand = 0.20`
-- `neg_zero_order_min_spend = 50`
-- `neg_high_acos_min_spend = 100`
-- `high_acos_cutoff = 1.0`
-- `review_band = (0.5, 1.0)`
-- `harvest_min_orders = 3`
-- `harvest_max_acos = 0.20`
+- `target_acos_blended <= 0.25`
+- `target_acos_discovery <= 0.25`
+- `target_acos_brand <= 0.20`
+- `neg_zero_order_min_spend >= 50`
+- `neg_high_acos_min_spend >= 100`
+- `high_acos_cutoff >= 1.0`
+- `review_acos_band = (0.5, 1.0)`
+- `harvest_min_orders >= 3`
+- `harvest_max_acos <= 0.20`
 
-## Pipeline (single agent, 4 sequential steps)
+## Pipeline (single agent, 5 sequential steps)
 
 ### 1. Load & Enrich
 
@@ -27,7 +27,9 @@
   - ` - Conv KW - ` → Conv KW (exact-match proven winners)
   - ` - Conq PAT - ` → Conquest product targeting
   - ` - Def PAT - ` → Defensive product targeting
-- Parse `Bucket` → Brand Defense if name contains "Brand", else Discovery.
+- Parse `Bucket` from `Customer Search Term`:
+  - Brand Defense if the normalized search term starts with `B0`
+  - Discovery otherwise
 - Recompute `ACoS = Spend/Sales`, `CTR = Clicks/Impressions`, `CVR = Orders/Clicks` (never trust export averages — they're row-level, not weighted).
 - Log enriched table as W&B Artifact.
 
@@ -64,13 +66,46 @@
 - Summarize HARVEST set: count, total sales, total orders, weighted avg ACoS — the growth headline.
 - **Self-check:** every HARVEST row must satisfy `clicks_in_auto_disc > 0 AND clicks_in_conv_exact == 0`.
 
-## Final Output: `next_month_recommendations.md`
+### 5. Executive Dashboard & Budget What-If
+
+- Generate a web-based dashboard for weekly business-leader review.
+- Dashboard must communicate the scorecard, CUT/FIX/GROW actions, budget gaps, and next-week decision posture in plain business language.
+- Accept human inputs:
+  - Brand Defense budget
+  - Discovery budget
+  - Harvest exact-match budget
+  - Experiment reserve
+  - Target blended ACoS
+  - CUT adoption rate
+  - CPC pressure assumption
+  - CVR lift/decline assumption
+  - Leader notes or constraints
+- Include what-if scenarios:
+  - **Efficiency Reset** — margin-first plan that does not simply cut budget. Rank cuts by the ratio of expected revenue loss to budget removed, and prefer changes that minimize `revenue_loss / budget_cut` while still improving ACoS.
+  - **Balanced Recovery** — target-ACoS discipline while funding proven HARVEST terms.
+  - **Growth Push** — higher spend on proven HARVEST and strategic discovery with explicit ACoS risk.
+- For Efficiency Reset, calculate for each candidate budget reduction:
+  - `budget_cut = current_spend - proposed_spend`
+  - `revenue_loss = current_sales - projected_sales`
+  - `cut_efficiency_ratio = revenue_loss / budget_cut`
+  - Prefer the lowest ratio, subject to ACoS target, minimum sales floor, and mandatory CUT/FIX guardrails.
+- Recalculate projected spend, projected sales, projected ACoS, target gap, CUT savings applied, harvest coverage, and sales/spend deltas as humans adjust inputs.
+- Produce concise, insightful notes:
+  - What changed vs. actual week
+  - Why the recommended budget is justified
+  - Where leaders are accepting risk
+  - Which actions are mandatory before budget release
+- Allow dashboard output to be used as the weekly budget-council artifact.
+
+## Final Outputs
 
 - **CUT list** — negatives to add, with $ recovered.
 - **FIX list** — REVIEW terms needing bid cuts or copy/landing fixes (sourced from scorecard misses).
 - **GROW list** — HARVEST terms to promote, with projected sales at current ACoS.
-- **Next-month targets** — spend ceiling, sales floor, blended ACoS, profitable-sales target. Each anchored to a scorecard number.
+- **Next-week targets** — spend ceiling, sales floor, blended ACoS, profitable-sales target. Each anchored to a scorecard number.
 - **Caveats** — bid-cut sales-dip risk, threshold sensitivity, overlap between negative/harvest sets.
+- **`next_month_recommendations.md`** — markdown operating report for the next-week action plan.
+- **Web dashboard** — weekly executive dashboard for communicating performance, testing what-if scenarios, collecting human budget input, and determining next week's ad budgets.
 
 ## Reliability hooks (W&B)
 
