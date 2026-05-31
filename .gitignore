@@ -17,7 +17,7 @@ env/
 *.key
 
 # Data & artifacts
-data/
+# data/
 wandb/
 artifacts/
 outputs/
